@@ -1,5 +1,24 @@
 use box_drawing::light as boxchars;
-use std::io::{self, BufWriter, Write};
+use std::{
+    fmt,
+    io::{self, BufWriter, Write},
+};
+
+#[derive(Debug, Clone, Copy)]
+pub enum Side {
+    Client,
+    Server,
+}
+
+impl fmt::Display for Side {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Side::Client => "CLIENT",
+            Side::Server => "SERVER",
+        };
+        f.write_str(s)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -10,8 +29,9 @@ pub enum Style {
 }
 
 pub trait Formatter: io::Write {
-    fn message(&mut self, sender: &str, message: &str) -> io::Result<()>;
-    fn start_block(&mut self, sender: &str, message: &str) -> io::Result<()>;
+    fn connected(&mut self, local: &dyn fmt::Display, remote: &dyn fmt::Display) -> io::Result<()>;
+    fn message(&mut self, side: Side, message: &str) -> io::Result<()>;
+    fn start_block(&mut self, side: Side, message: &str) -> io::Result<()>;
     fn end_block(&mut self) -> io::Result<()>;
     fn set_style(&mut self, style: Style) -> io::Result<()>;
 }
@@ -65,17 +85,25 @@ impl io::Write for TextFormatter {
 }
 
 impl Formatter for TextFormatter {
-    fn message(&mut self, sender: &str, message: &str) -> io::Result<()> {
+    fn connected(
+        &mut self,
+        client: &dyn fmt::Display,
+        server: &dyn fmt::Display,
+    ) -> io::Result<()> {
+        writeln!(self.out, "• CONNECT {client} to {server}")
+    }
+
+    fn message(&mut self, side: Side, message: &str) -> io::Result<()> {
         assert!(!self.in_block);
         assert!(self.at_start);
-        writeln!(self.out, " {sender} {message}")?;
+        writeln!(self.out, "• {side} {message}")?;
         self.flush()
     }
 
-    fn start_block(&mut self, sender: &str, message: &str) -> io::Result<()> {
+    fn start_block(&mut self, side: Side, message: &str) -> io::Result<()> {
         assert!(!self.in_block);
         assert!(self.at_start);
-        write!(self.out, "{} MESSAGE {sender}", boxchars::DOWN_RIGHT)?;
+        write!(self.out, "{} {side}", boxchars::DOWN_RIGHT)?;
         if !message.is_empty() {
             write!(self.out, " {message}")?;
         }
@@ -100,15 +128,12 @@ impl Formatter for TextFormatter {
     }
 }
 
-pub fn dump_text<F: Formatter>(f: &mut F, data: &[u8]) -> io::Result<()> {
-    for &b in data {
-        match char::from_u32(b as u32) {
-            Some(c) if !c.is_ascii_control() => write!(f, "{c}")?,
-            Some('\n') => {
-                writeln!(f, "↵")?;
-            }
-            Some('\t') => write!(f, "→")?,
-            _ => write!(f, "«{b:02X}»")?,
+pub fn dump_text<F: Formatter>(f: &mut F, text: &str) -> io::Result<()> {
+    for c in text.chars() {
+        match c {
+            '\n' => writeln!(f, "↵")?,
+            '\t' => write!(f, "→")?,
+            _ => write!(f, "{c}")?,
         }
     }
     Ok(())
