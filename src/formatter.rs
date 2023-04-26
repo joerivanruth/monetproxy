@@ -182,7 +182,8 @@ fn dump_line(f: &mut dyn Formatter, data: &[u8], n: usize) -> io::Result<()> {
             Some(c) if c.is_ascii() && !c.is_ascii_control() => c,
             Some('\n') => '↵',
             Some('\t') => '→',
-            _ => '░',
+            Some('\u{0000}') => '░',
+            _ => '▒',
         };
         write!(f, "{disp}")?;
     }
