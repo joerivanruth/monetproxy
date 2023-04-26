@@ -69,13 +69,13 @@ impl Blocks {
         Ok(())
     }
 
-    fn describe_eof(&mut self) -> Result<&'static str, &'static str> {
+    fn describe_eof(&mut self) -> &'static str {
         let n = self.buffer.len();
         assert_ne!(n, self.goal);
         match n {
-            0 => Ok(CLOSE_MESSAGE),
-            1 => Err("eof on incomplete block header"),
-            _ => Err("eof on incomplete block body"),
+            0 => CLOSE_MESSAGE,
+            1 => "eof on incomplete block header",
+            _ => "eof on incomplete block body",
         }
     }
 }
@@ -116,17 +116,14 @@ impl<F: Formatter + Send> Observer for MessageObserver<F> {
     }
 
     fn on_close(&mut self) -> io::Result<()> {
-        let mut f = self.formatter.lock().unwrap();
-        match self.blocks.describe_eof() {
-            Ok(msg) => f.message(self.side, msg),
-            Err(msg) => f.message(self.side, msg),
-        }
+        let message = self.blocks.describe_eof();
+        self.formatter.lock().unwrap().message(self.side, message)
     }
 
-    fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()> {
-        let msg = format!("encountered an error {kind}: {err}");
-        let mut f = self.formatter.lock().unwrap();
-        f.message(self.side, &msg)
+    fn on_error(&mut self, while_writing: bool, err: &io::Error) -> io::Result<()> {
+        let action = describe_error(self.side, while_writing);
+        let msg = format!("{action}: {err}");
+        self.formatter.lock().unwrap().message(self.side, &msg)
     }
 
     fn on_unix0(&mut self, _data: &[u8], _message: Option<&str>) -> io::Result<()> {
@@ -153,14 +150,12 @@ impl<F: Formatter + Send> Observer for RawObserver<F> {
     }
 
     fn on_close(&mut self) -> io::Result<()> {
-        self.formatter
-            .lock()
-            .unwrap()
-            .message(self.side, CLOSE_MESSAGE)
+        self.formatter.lock().unwrap().message(self.side, CLOSE_MESSAGE)
     }
 
-    fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()> {
-        let msg = format!("encountered an error {kind}: {err}");
+    fn on_error(&mut self, while_writing: bool, err: &io::Error) -> io::Result<()> {
+        let action = describe_error(self.side, while_writing);
+        let msg = format!("{action}: {err}");
         self.formatter.lock().unwrap().message(self.side, &msg)
     }
 
@@ -203,15 +198,13 @@ impl<F: Formatter + Send> Observer for BlockObserver<F> {
     }
 
     fn on_close(&mut self) -> io::Result<()> {
-        let mut f = self.formatter.lock().unwrap();
-        match self.blocks.describe_eof() {
-            Ok(msg) => f.message(self.side, msg),
-            Err(msg) => f.message(self.side, msg),
-        }
+        let message = self.blocks.describe_eof();
+        self.formatter.lock().unwrap().message(self.side, message)
     }
 
-    fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()> {
-        let msg = format!("encountered an error {kind}: {err}");
+    fn on_error(&mut self, while_writing: bool, err: &io::Error) -> io::Result<()> {
+        let action = describe_error(self.side, while_writing);
+        let msg = format!("{action}: {err}");
         self.formatter.lock().unwrap().message(self.side, &msg)
     }
 
@@ -220,5 +213,14 @@ impl<F: Formatter + Send> Observer for BlockObserver<F> {
             self.formatter.lock().unwrap().message(self.side, m)?
         }
         Ok(())
+    }
+}
+
+
+fn describe_error(side: Side, while_writing: bool) -> &'static str {
+    match (side, while_writing) {
+        (Side::Client, true) => "encountered an error writing to server",
+        (Side::Server, true) => "encountered an error writing to client",
+        (_, false) => "could not be read",
     }
 }

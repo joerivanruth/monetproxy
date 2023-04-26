@@ -14,7 +14,7 @@ pub const BLOCKSIZE: usize = 8190;
 pub trait Observer: Send {
     fn on_data(&mut self, data: &[u8]) -> io::Result<()>;
     fn on_close(&mut self) -> io::Result<()>;
-    fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()>;
+    fn on_error(&mut self, while_writing: bool, err: &io::Error) -> io::Result<()>;
     fn on_unix0(&mut self, data: &[u8], message: Option<&str>) -> io::Result<()>;
 }
 
@@ -151,7 +151,7 @@ fn pump(mut inspector: impl Observer, mut r: Incoming, mut w: Outgoing) -> io::R
     loop {
         let nread = match r.read(&mut buffer) {
             Err(e) => {
-                let result = inspector.on_error("reading from the server", &e);
+                let result = inspector.on_error(false, &e);
                 let _ = w.shutdown();
                 return result;
             }
@@ -166,9 +166,9 @@ fn pump(mut inspector: impl Observer, mut r: Incoming, mut w: Outgoing) -> io::R
         inspector.on_data(&buffer[..nread])?;
 
         if let Err(e) = w.write_all(&buffer[0..nread]) {
-            inspector.on_error("writing to the client", &e)?;
+            inspector.on_error(true, &e)?;
             let _ = r.shutdown();
-            return Err(e);
+            return Ok(());
         }
     }
 }
