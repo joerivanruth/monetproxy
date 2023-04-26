@@ -11,7 +11,7 @@ use crate::network::{Address, Incoming, Outgoing};
 
 pub const BLOCKSIZE: usize = 8190;
 
-pub trait Inspector: Send {
+pub trait Observer: Send {
     fn on_data(&mut self, data: &[u8]) -> io::Result<()>;
     fn on_close(&mut self) -> io::Result<()>;
     fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()>;
@@ -26,7 +26,7 @@ pub fn spawn_listener<O, I, F>(
 ) -> JoinHandle<()>
 where
     O: Formatter + Send + 'static,
-    I: Inspector + Send + 'static,
+    I: Observer + Send + 'static,
     F: FnMut(Side, Arc<Mutex<O>>) -> I + Send + Sync + 'static,
 {
     spawn_worker(addr.to_string(), move || {
@@ -42,7 +42,7 @@ fn listen<O, I, F>(
 ) -> io::Result<()>
 where
     O: Formatter,
-    I: Inspector + Send + 'static,
+    I: Observer + Send + 'static,
     F: FnMut(Side, Arc<Mutex<O>>) -> I + Send + Sync + 'static,
 {
     let mut accepter = addr.listen()?;
@@ -136,7 +136,7 @@ fn connect_unix(p: impl AsRef<Path>) -> io::Result<(Incoming, Outgoing, Address)
     Ok((Incoming::Unix(conn1), Outgoing::Unix(conn2), peer))
 }
 
-fn pump(mut inspector: impl Inspector, mut r: Incoming, mut w: Outgoing) -> io::Result<()> {
+fn pump(mut inspector: impl Observer, mut r: Incoming, mut w: Outgoing) -> io::Result<()> {
     let mut buffer = [0u8; BLOCKSIZE];
 
     loop {

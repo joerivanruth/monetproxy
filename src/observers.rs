@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::formatter::Side;
 use crate::formatter::{dump_binary, dump_text, Formatter};
-use crate::proxy::Inspector;
+use crate::proxy::Observer;
 
-pub struct MessageInspector<F> {
+pub struct MessageObserver<F> {
     side: Side,
     formatter: Arc<Mutex<F>>,
     buffer: Vec<u8>,
@@ -15,9 +15,9 @@ pub struct MessageInspector<F> {
     last_block: bool,
 }
 
-impl<F: Formatter> MessageInspector<F> {
-    pub fn new(side: Side, formatter: Arc<Mutex<F>>) -> MessageInspector<F> {
-        MessageInspector {
+impl<F: Formatter> MessageObserver<F> {
+    pub fn new(side: Side, formatter: Arc<Mutex<F>>) -> MessageObserver<F> {
+        MessageObserver {
             side,
             formatter,
             buffer: vec![],
@@ -86,7 +86,7 @@ impl<F: Formatter> MessageInspector<F> {
     }
 }
 
-impl<F: Formatter + Send> Inspector for MessageInspector<F> {
+impl<F: Formatter + Send> Observer for MessageObserver<F> {
     fn on_data(&mut self, mut data: &[u8]) -> io::Result<()> {
         while !data.is_empty() {
             assert!(self.buffer.len() < self.goal);

@@ -1,6 +1,6 @@
 mod formatter;
-mod inspect;
 mod network;
+mod observers;
 mod proxy;
 
 use anyhow::Result as AResult;
@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use inspect::MessageInspector;
+use observers::MessageObserver;
 use proxy::spawn_listener;
 
 const USAGE: &str = "\
@@ -45,7 +45,7 @@ fn mymain() -> AResult<()> {
 
     for addr in expand_listen_address(&listen_addr)? {
         let cloned = Arc::clone(&formatter);
-        spawn_listener(addr, forward_addr.clone(), cloned, MessageInspector::new);
+        spawn_listener(addr, forward_addr.clone(), cloned, MessageObserver::new);
     }
 
     loop {
