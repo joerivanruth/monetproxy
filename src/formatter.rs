@@ -21,20 +21,11 @@ impl fmt::Display for Side {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
-pub enum Style {
-    Other,
-    Whitespace,
-    AlphaNum,
-}
-
 pub trait Formatter: io::Write {
     fn connected(&mut self, local: &dyn fmt::Display, remote: &dyn fmt::Display) -> io::Result<()>;
     fn message(&mut self, side: Side, message: &str) -> io::Result<()>;
     fn start_block(&mut self, side: Side, message: &str) -> io::Result<()>;
     fn end_block(&mut self) -> io::Result<()>;
-    fn set_style(&mut self, style: Style) -> io::Result<()>;
     fn force_binary(&self) -> bool;
 }
 
@@ -78,8 +69,7 @@ impl io::Write for TextFormatter {
 
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         assert!(self.in_block);
-        let x = buf.split_inclusive(|b| *b == b'\n');
-        for line in x {
+        for line in buf.split_inclusive(|b| *b == b'\n') {
             assert!(!line.is_empty());
             if self.at_start {
                 self.out.write_all(boxchars::VERTICAL.as_bytes())?;
@@ -127,11 +117,6 @@ impl Formatter for TextFormatter {
         self.out.write_all(b"\n")?;
         self.flush()?;
         self.in_block = false;
-        Ok(())
-    }
-
-    fn set_style(&mut self, style: Style) -> io::Result<()> {
-        let _ = style;
         Ok(())
     }
 
