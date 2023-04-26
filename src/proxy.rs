@@ -15,7 +15,7 @@ pub trait Observer: Send {
     fn on_data(&mut self, data: &[u8]) -> io::Result<()>;
     fn on_close(&mut self) -> io::Result<()>;
     fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()>;
-    fn on_adjustment(&mut self, message: &str) -> io::Result<()>;
+    fn on_unix0(&mut self, data: &[u8], message: &str) -> io::Result<()>;
 }
 
 pub fn spawn_listener<O, I, F>(
@@ -56,19 +56,6 @@ where
             .unwrap()
             .connected(&addr, &server_address)?;
 
-        use Address::*;
-        let mut to_insert = &b""[..];
-        let mut to_remove = &b""[..];
-        match (&client_address, &server_address) {
-            (Inet(_), Unix(_)) => {
-                to_insert = &b"0"[..];
-            }
-            (Unix(_), Inet(_)) => {
-                to_remove = &b"0"[..];
-            }
-            _ => {}
-        };
-
         let mut inspect_client = make_inspector(Side::Client, Arc::clone(&formatter));
         let inspect_server = make_inspector(Side::Server, Arc::clone(&formatter));
 
@@ -76,26 +63,7 @@ where
             pump(inspect_server, from_server, to_client)
         });
         spawn_worker(format!("upstream-{client_address}"), move || {
-            if !to_remove.is_empty() {
-                assert_eq!(to_remove, &[b'0']);
-                let mut buffer = [0u8; 1];
-                from_client.read_exact(&mut buffer)?;
-                if buffer[0] == b'0' {
-                    inspect_client.on_adjustment("adjust unix->inet socket: remove leading '0'")?;
-                } else {
-                    let msg = format!(
-                        "expected first byte on unix socket to be '0', got {c:?}",
-                        c = buffer[0]
-                    );
-                    let kind = io::ErrorKind::InvalidData;
-                    return Err(io::Error::new(kind, msg));
-                }
-            }
-            if !to_insert.is_empty() {
-                inspect_client.on_adjustment("adjust inet->unix socket: insert '0'")?;
-                to_server.write_all(to_insert)?;
-                to_server.flush()?;
-            }
+            adjust_unix(&mut inspect_client, &mut from_client, &mut to_server)?;
             pump(inspect_client, from_client, to_server)
         });
     }
@@ -134,6 +102,41 @@ fn connect_unix(p: impl AsRef<Path>) -> io::Result<(Incoming, Outgoing, Address)
     let peer = Address::Unix(p.into());
 
     Ok((Incoming::Unix(conn1), Outgoing::Unix(conn2), peer))
+}
+
+fn adjust_unix(observer: &mut dyn Observer, r: &mut Incoming, w: &mut Outgoing) -> io::Result<()> {
+    remove_unix0(r)?;
+    match (&r, &w) {
+        (Incoming::Inet(_), Outgoing::Inet(_)) => {},
+        (Incoming::Inet(_), Outgoing::Unix(_)) => observer.on_unix0(b"", "proxy inserting '0' to adjust inet->unix")?,
+        (Incoming::Unix(_), Outgoing::Inet(_)) => observer.on_unix0(b"0", "proxy eliminated '0' to adjust unix->inet")?,
+        (Incoming::Unix(_), Outgoing::Unix(_)) => observer.on_unix0(b"0", "specific to unix domain sockets")?,
+    }
+    insert_unix0(w)
+}
+
+fn remove_unix0(r: &mut Incoming) -> io::Result<()> {
+    let Incoming::Unix(ref mut r) = r else { return Ok(()) };
+
+    let mut buffer = [0u8];
+    r.read_exact(&mut buffer)?;
+    if buffer[0] == b'0' {
+        Ok(())
+    } else {
+        let kind = io::ErrorKind::InvalidData;
+        let msg = format!(
+            "expected first character from client unix domain socket to be 0x30 ('0'), got 0x{x:02x}",
+            x = buffer[0]
+        );
+        Err(io::Error::new(kind, msg))
+    }
+}
+
+fn insert_unix0(w: &mut Outgoing) -> io::Result<()> {
+    if let Outgoing::Unix(ref mut w) = w {
+        w.write_all(b"0")?;
+    }
+    Ok(())
 }
 
 fn pump(mut inspector: impl Observer, mut r: Incoming, mut w: Outgoing) -> io::Result<()> {

@@ -128,7 +128,7 @@ impl Formatter for TextFormatter {
     }
 }
 
-pub fn dump_text<F: Formatter>(f: &mut F, text: &str) -> io::Result<()> {
+pub fn dump_text(f: &mut dyn Formatter, text: &str) -> io::Result<()> {
     for c in text.chars() {
         match c {
             '\n' => writeln!(f, "↵")?,
@@ -139,7 +139,7 @@ pub fn dump_text<F: Formatter>(f: &mut F, text: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn dump_binary<F: Formatter>(f: &mut F, data: &[u8]) -> io::Result<()> {
+pub fn dump_binary(f: &mut dyn Formatter, data: &[u8]) -> io::Result<()> {
     let n = 16;
     for line in data.chunks(n) {
         dump_line(f, line, n)?;
@@ -147,7 +147,7 @@ pub fn dump_binary<F: Formatter>(f: &mut F, data: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-fn dump_line<F: Formatter>(f: &mut F, data: &[u8], n: usize) -> io::Result<()> {
+fn dump_line(f: &mut dyn Formatter, data: &[u8], n: usize) -> io::Result<()> {
     for i in 0..n {
         if i < data.len() {
             let b = data[i];
