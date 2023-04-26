@@ -1,11 +1,12 @@
 use std::io;
 
-use std::str::from_utf8;
 use std::sync::{Arc, Mutex};
 
-use crate::formatter::Side;
-use crate::formatter::{dump_binary, dump_text, Formatter};
+use crate::formatter::Formatter;
+use crate::formatter::{print_message, Side};
 use crate::proxy::Observer;
+
+const CLOSE_MESSAGE: &str = "closed its side of the connection";
 
 struct Blocks {
     buffer: Vec<u8>,
@@ -22,7 +23,10 @@ impl Blocks {
         }
     }
 
-    fn process(&mut self,mut data: &[u8],callback: &mut dyn FnMut(&[u8], bool) -> io::Result<()>
+    fn process(
+        &mut self,
+        mut data: &[u8],
+        callback: &mut dyn FnMut(&[u8], bool) -> io::Result<()>,
     ) -> io::Result<()> {
         while !data.is_empty() {
             // Move some data into the buffer, there must be some room
@@ -69,9 +73,9 @@ impl Blocks {
         let n = self.buffer.len();
         assert_ne!(n, self.goal);
         match n {
-            0 => Ok("closed its side of the connection"),
+            0 => Ok(CLOSE_MESSAGE),
             1 => Err("eof on incomplete block header"),
-            _ => Err("eof on incomplete block body")
+            _ => Err("eof on incomplete block body"),
         }
     }
 }
@@ -94,38 +98,13 @@ impl<F: Formatter> MessageObserver<F> {
     }
 }
 
-fn print_message(f: &mut dyn Formatter, side: Side, data: &[u8]) -> io::Result<()> {
-    let text = is_printable_text(data);
-
-    let n = data.len();
-    let msg = if text.is_some() {
-        if data.is_empty() || data.ends_with(b"\n") {
-            format!("text, {n} bytes")
-        } else {
-            format!("text, {n} bytes, no trailing newline!")
-        }
-    } else {
-        format!("binary, {n} bytes")
-    };
-
-    f.start_block(side, &msg)?;
-    if let Some(t) = text {
-        dump_text(f, t)?;
-    } else {
-        dump_binary(f, data)?;
-    }
-    f.end_block()?;
-
-    Ok(())
-}
-
 impl<F: Formatter + Send> Observer for MessageObserver<F> {
     fn on_data(&mut self, data: &[u8]) -> io::Result<()> {
         self.blocks.process(data, &mut |block, is_last| {
             self.message.extend_from_slice(block);
             if is_last {
                 let mut f = self.formatter.lock().unwrap();
-                let result = print_message(&mut *f, self.side, &self.message);
+                let result = print_message(&mut *f, self.side, &self.message, &[]);
                 self.message.clear();
                 result
             } else {
@@ -150,23 +129,96 @@ impl<F: Formatter + Send> Observer for MessageObserver<F> {
         f.message(self.side, &msg)
     }
 
-    fn on_unix0(&mut self, _data: &[u8], _message: &str) -> io::Result<()> {
+    fn on_unix0(&mut self, _data: &[u8], _message: Option<&str>) -> io::Result<()> {
         // ignore
         Ok(())
     }
 }
 
-fn is_printable_text(data: &[u8]) -> Option<&str> {
-    if let Ok(text) = from_utf8(data) {
-        let scary = text
-            .chars()
-            .find(|&c| c.is_control() && c != '\n' && c != '\t');
-        if scary.is_some() {
-            None
-        } else {
-            Some(text)
+pub struct RawObserver<F> {
+    formatter: Arc<Mutex<F>>,
+    side: Side,
+}
+
+impl<F: Formatter + Send> RawObserver<F> {
+    pub fn new(side: Side, formatter: Arc<Mutex<F>>) -> RawObserver<F> {
+        RawObserver { formatter, side }
+    }
+}
+
+impl<F: Formatter + Send> Observer for RawObserver<F> {
+    fn on_data(&mut self, data: &[u8]) -> io::Result<()> {
+        let mut f = self.formatter.lock().unwrap();
+        print_message(&mut *f, self.side, data, &[])
+    }
+
+    fn on_close(&mut self) -> io::Result<()> {
+        self.formatter
+            .lock()
+            .unwrap()
+            .message(self.side, CLOSE_MESSAGE)
+    }
+
+    fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()> {
+        let msg = format!("encountered an error {kind}: {err}");
+        self.formatter.lock().unwrap().message(self.side, &msg)
+    }
+
+    fn on_unix0(&mut self, data: &[u8], message: Option<&str>) -> io::Result<()> {
+        self.on_data(data)?;
+        if let Some(m) = message {
+            self.formatter.lock().unwrap().message(self.side, m)?
         }
-    } else {
-        None
+        Ok(())
+    }
+}
+
+pub struct BlockObserver<F> {
+    formatter: Arc<Mutex<F>>,
+    side: Side,
+    blocks: Blocks,
+}
+
+impl<F: Formatter + Send> BlockObserver<F> {
+    pub fn new(side: Side, formatter: Arc<Mutex<F>>) -> BlockObserver<F> {
+        BlockObserver {
+            formatter,
+            side,
+            blocks: Blocks::new(),
+        }
+    }
+}
+
+impl<F: Formatter + Send> Observer for BlockObserver<F> {
+    fn on_data(&mut self, data: &[u8]) -> io::Result<()> {
+        let mut f = self.formatter.lock().unwrap();
+        self.blocks.process(data, &mut |block, is_last| {
+            let remarks = [if is_last {
+                "ends the message"
+            } else {
+                "does not end the message"
+            }];
+            print_message(&mut *f, self.side, block, &remarks)
+        })
+    }
+
+    fn on_close(&mut self) -> io::Result<()> {
+        let mut f = self.formatter.lock().unwrap();
+        match self.blocks.describe_eof() {
+            Ok(msg) => f.message(self.side, msg),
+            Err(msg) => f.message(self.side, msg),
+        }
+    }
+
+    fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()> {
+        let msg = format!("encountered an error {kind}: {err}");
+        self.formatter.lock().unwrap().message(self.side, &msg)
+    }
+
+    fn on_unix0(&mut self, _data: &[u8], message: Option<&str>) -> io::Result<()> {
+        if let Some(m) = message {
+            self.formatter.lock().unwrap().message(self.side, m)?
+        }
+        Ok(())
     }
 }

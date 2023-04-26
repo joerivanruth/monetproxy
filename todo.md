@@ -7,10 +7,6 @@ Now
 
 * Colors
 
-* Inspect blocks
-
-* Inspect bytes
-
 
 Later
 -----
@@ -25,3 +21,6 @@ Done
 
 * Listen on unix domain socket
 
+* Inspect blocks
+
+* Inspect bytes

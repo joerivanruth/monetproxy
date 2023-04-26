@@ -2,6 +2,7 @@ use box_drawing::light as boxchars;
 use std::{
     fmt,
     io::{self, BufWriter, Write},
+    str::from_utf8,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -34,10 +35,12 @@ pub trait Formatter: io::Write {
     fn start_block(&mut self, side: Side, message: &str) -> io::Result<()>;
     fn end_block(&mut self) -> io::Result<()>;
     fn set_style(&mut self, style: Style) -> io::Result<()>;
+    fn force_binary(&self) -> bool;
 }
 
 pub struct TextFormatter {
     out: BufWriter<Box<dyn Write + Send>>,
+    force_binary: bool,
     in_block: bool,
     at_start: bool,
 }
@@ -48,6 +51,7 @@ impl TextFormatter {
         let out = BufWriter::new(w);
         TextFormatter {
             out,
+            force_binary: false,
             in_block: false,
             at_start: true,
         }
@@ -60,6 +64,10 @@ impl TextFormatter {
         }
         self.at_start = true;
         Ok(())
+    }
+
+    pub fn set_force_binary(&mut self, b: bool) {
+        self.force_binary = b;
     }
 }
 
@@ -126,6 +134,10 @@ impl Formatter for TextFormatter {
         let _ = style;
         Ok(())
     }
+
+    fn force_binary(&self) -> bool {
+        self.force_binary
+    }
 }
 
 pub fn dump_text(f: &mut dyn Formatter, text: &str) -> io::Result<()> {
@@ -167,7 +179,7 @@ fn dump_line(f: &mut dyn Formatter, data: &[u8], n: usize) -> io::Result<()> {
     write!(f, "  ")?;
     for &b in data {
         let disp = match char::from_u32(b as u32) {
-            Some(c) if !c.is_ascii_control() => c,
+            Some(c) if c.is_ascii() && !c.is_ascii_control() => c,
             Some('\n') => '↵',
             Some('\t') => '→',
             _ => '░',
@@ -176,4 +188,57 @@ fn dump_line(f: &mut dyn Formatter, data: &[u8], n: usize) -> io::Result<()> {
     }
 
     writeln!(f)
+}
+
+pub fn print_message(
+    f: &mut dyn Formatter,
+    side: Side,
+    data: &[u8],
+    remarks: &[&str],
+) -> io::Result<()> {
+    let text = if f.force_binary() {
+        None
+    } else {
+        is_printable_text(data)
+    };
+
+    let n = data.len();
+    let mut msg = if text.is_some() {
+        if data.is_empty() || data.ends_with(b"\n") {
+            format!("text, {n} bytes")
+        } else {
+            format!("text, {n} bytes, no trailing newline")
+        }
+    } else {
+        format!("binary, {n} bytes")
+    };
+    for r in remarks {
+        msg.push_str(", ");
+        msg.push_str(r);
+    }
+
+    f.start_block(side, &msg)?;
+    if let Some(t) = text {
+        dump_text(f, t)?;
+    } else {
+        dump_binary(f, data)?;
+    }
+    f.end_block()?;
+
+    Ok(())
+}
+
+fn is_printable_text(data: &[u8]) -> Option<&str> {
+    if let Ok(text) = from_utf8(data) {
+        let scary = text
+            .chars()
+            .find(|&c| c.is_control() && c != '\n' && c != '\t');
+        if scary.is_some() {
+            None
+        } else {
+            Some(text)
+        }
+    } else {
+        None
+    }
 }

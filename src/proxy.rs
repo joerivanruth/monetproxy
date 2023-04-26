@@ -15,7 +15,7 @@ pub trait Observer: Send {
     fn on_data(&mut self, data: &[u8]) -> io::Result<()>;
     fn on_close(&mut self) -> io::Result<()>;
     fn on_error(&mut self, kind: &str, err: &io::Error) -> io::Result<()>;
-    fn on_unix0(&mut self, data: &[u8], message: &str) -> io::Result<()>;
+    fn on_unix0(&mut self, data: &[u8], message: Option<&str>) -> io::Result<()>;
 }
 
 pub fn spawn_listener<O, I, F>(
@@ -107,10 +107,16 @@ fn connect_unix(p: impl AsRef<Path>) -> io::Result<(Incoming, Outgoing, Address)
 fn adjust_unix(observer: &mut dyn Observer, r: &mut Incoming, w: &mut Outgoing) -> io::Result<()> {
     remove_unix0(r)?;
     match (&r, &w) {
-        (Incoming::Inet(_), Outgoing::Inet(_)) => {},
-        (Incoming::Inet(_), Outgoing::Unix(_)) => observer.on_unix0(b"", "proxy inserting '0' to adjust inet->unix")?,
-        (Incoming::Unix(_), Outgoing::Inet(_)) => observer.on_unix0(b"0", "proxy eliminated '0' to adjust unix->inet")?,
-        (Incoming::Unix(_), Outgoing::Unix(_)) => observer.on_unix0(b"0", "specific to unix domain sockets")?,
+        (Incoming::Inet(_), Outgoing::Inet(_)) => {}
+        (Incoming::Inet(_), Outgoing::Unix(_)) => observer.on_unix0(
+            b"",
+            Some("proxy inserting leading '0' to adjust inet->unix"),
+        )?,
+        (Incoming::Unix(_), Outgoing::Inet(_)) => observer.on_unix0(
+            b"0",
+            Some("proxy eliminated leading '0' to adjust unix->inet"),
+        )?,
+        (Incoming::Unix(_), Outgoing::Unix(_)) => observer.on_unix0(b"0", None)?,
     }
     insert_unix0(w)
 }
