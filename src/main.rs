@@ -1,18 +1,20 @@
 mod formatter;
 mod inspect;
+mod network;
 mod proxy;
 
 use anyhow::Result as AResult;
 use argsplitter::{ArgError, ArgSplitter};
 use formatter::TextFormatter;
+use network::Address;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::inspect::MessageInspector;
-use crate::proxy::{spawn_listener, Address};
+use inspect::MessageInspector;
+use proxy::spawn_listener;
 
 const USAGE: &str = "\
 Usage:  monetproxy LISTEN_ADDR DEST_ADDR
