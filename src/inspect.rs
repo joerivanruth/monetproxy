@@ -124,4 +124,9 @@ impl<F: Formatter + Send> Inspector for MessageInspector<F> {
         let mut f = self.formatter.lock().unwrap();
         f.message(self.side, &msg)
     }
+
+    fn on_adjustment(&mut self, _message: &str) -> io::Result<()> {
+        // ignore
+        Ok(())
+    }
 }

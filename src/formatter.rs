@@ -90,7 +90,7 @@ impl Formatter for TextFormatter {
         client: &dyn fmt::Display,
         server: &dyn fmt::Display,
     ) -> io::Result<()> {
-        writeln!(self.out, "• CONNECT {client} to {server}")
+        writeln!(self.out, "• PROXY {client} to {server}")
     }
 
     fn message(&mut self, side: Side, message: &str) -> io::Result<()> {

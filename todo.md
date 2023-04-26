@@ -5,13 +5,11 @@ TO DO
 Now
 ---
 
-* Forward to unix domain socket
-
-* Listen on unix domain socket
-
 * Colors
 
 * Inspect blocks
+
+* Inspect bytes
 
 
 Later
@@ -22,4 +20,8 @@ Later
 
 Done
 ----
+
+* Forward to unix domain socket
+
+* Listen on unix domain socket
 
