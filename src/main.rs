@@ -16,6 +16,8 @@ use std::thread;
 use observers::{BlockObserver, MessageObserver, RawObserver};
 use proxy::spawn_listener;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 const USAGE: &str = "\
 Usage:  monetproxy [OPTION..] LISTEN_ADDR DEST_ADDR
         (ADDR is PORT or HOST:PORT or ../PATH/TO/SOCKET)
@@ -25,6 +27,7 @@ Options:
     -b --blocks     Dump blocks
     -m --messages   Dump messages (default)
     -B --binary     Force binary dump
+    -v --version    Show version information
 ";
 
 fn main() -> ExitCode {
@@ -52,6 +55,10 @@ fn mymain() -> AResult<()> {
             "-b" | "--blocks" => observe = Observe::Blocks,
             "-m" | "--messages" => observe = Observe::Messages,
             "-B" | "--binary" => force_binary = true,
+            "-v" | "--version" => {
+                println!("Monetproxy {VERSION}");
+                return Ok(());
+            }
             _ => Err(ArgError::unknown_flag(flag))?,
         }
     }
